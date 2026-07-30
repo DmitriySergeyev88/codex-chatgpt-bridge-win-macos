@@ -11,10 +11,6 @@
 </p>
 
 <p align="center">
-  MCP 桥本身是上游开源项目 <a href="https://github.com/Waishnav/devspace">DevSpace</a>。本仓库提供面向 DevSpace 的 agent skill 与进程外控制层，让 agent 能自己开、关、重启桥，并且不必重新连 ChatGPT app。
-</p>
-
-<p align="center">
   <a href="https://github.com/Zhenyu98/codex-chatgpt-bridge/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Zhenyu98/codex-chatgpt-bridge?style=for-the-badge&logo=github"></a>
   <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge"></a>
   <img alt="Windows PowerShell" src="https://img.shields.io/badge/Windows-PowerShell-blue?style=for-the-badge&logo=windows&logoColor=white">
@@ -36,25 +32,25 @@
   <img src="docs/assets/architecture.svg" alt="Codex ChatGPT Bridge 架构" width="92%" />
 </p>
 
-让 Codex 和 ChatGPT 像两个协作代理一样分工：Codex 负责本地执行，ChatGPT 负责深度思考、审查和大上下文理解。
+让 Codex 和 ChatGPT 作为两个协作代理进行分工：Codex 负责本地执行，ChatGPT 负责深度思考、审查和大上下文理解。
 
 ## 这是什么
 
-MCP 桥本身是上游开源项目 [DevSpace](https://github.com/Waishnav/devspace)，从 npm 安装为 `@waishnav/devspace`，由它提供 MCP server、OAuth、文件工具和 `run_shell`。本仓库不 fork、不打补丁，也不在它外面再套一层 server。
+MCP 桥本身是上游开源项目 [DevSpace](https://github.com/Waishnav/devspace)，通过 npm 安装，包名为 `@waishnav/devspace`，由它提供 MCP server、OAuth、文件工具和 `run_shell`。本仓库不 fork、不打补丁，也不在它外面再套一层 server。
 
-本仓库补的是把 DevSpace 真正放到「coding agent ↔ ChatGPT」之间以后缺的两样东西：**一份告诉 agent 该怎么用它的 skill**，以及**跑在桥进程之外的控制脚本**。
+把 DevSpace 真正部署在「coding agent ↔ ChatGPT」之间以后，还缺两样东西，本仓库补上的正是它们：**一份告诉 agent 该怎么用它的 skill**，以及**跑在桥进程之外的控制脚本**。
 
 | 层 | 归属 | 负责什么 |
 |---|---|---|
 | MCP 桥 | DevSpace（上游） | MCP server、OAuth、文件工具、`run_shell` |
-| Skill | 本仓库 — `SKILL.md` | 什么活该交给 ChatGPT、`L0`–`L5` 权限等级、任务包与 manifest 格式、人工审批门 |
+| Skill | 本仓库 — `SKILL.md` | 哪些任务应交给 ChatGPT、`L0`–`L5` 权限等级、任务包与 manifest 格式、人工审批环节 |
 | 控制层 | 本仓库 — `scripts/bridge_controller.ps1` | 把 `On` / `Off` / `Reboot` 做成一个带互斥锁、带健康校验的期望状态事务 |
 | 外部恢复 | 本仓库 — `scripts/restart_task.ps1` | 按需的 Windows 计划任务，agent 已经够不到桥时也能把它重启起来 |
 | 链路稳定 | 本仓库 — `scripts/set_cf_api_config.ps1` | 刷新稳定 Worker 的 upstream，让对外的 MCP URL 始终不变 |
 
 上表中的仓库路径都相对于 [skills/codex-chatgpt-bridge/](skills/codex-chatgpt-bridge)，也就是 `install.ps1` 复制到 `%USERPROFILE%\.codex\skills\codex-chatgpt-bridge` 的那一份。
 
-控制层刻意放在桥之外。桥停了之后没法自己把自己拉起来；刚把自己的通道关掉的 agent 更没有回路。所以生命周期交给 agent 调用的脚本，再加一个「agent 也调不动时由 Windows 来调」的计划任务。
+控制层刻意放在桥之外。桥停了之后无法自行重启；刚关闭自身通道的 agent 更是失去了控制链路。所以生命周期交给 agent 调用的脚本，再加一个「agent 也无法调用时由 Windows 触发」的计划任务。
 
 这个项目的目标很简单：
 
@@ -68,7 +64,7 @@ MCP 桥本身是上游开源项目 [DevSpace](https://github.com/Waishnav/devspa
 适合已经在使用 Codex，并且希望把 ChatGPT 作为强力协作代理的人：
 
 - 想让 ChatGPT 帮忙读大项目，但不想把大量文件复制进 Codex 对话。
-- 想让 ChatGPT 做架构审查、论文/硬件/复杂 bug 的第二意见。
+- 想让 ChatGPT 提供架构审查、论文/硬件/复杂 bug 的第二意见。
 - 想保留 Codex 对本地文件、测试、构建、git 的执行控制权。
 - 想在安全边界内使用本地 MCP：窄暴露、用完即关、随时改锁。
 
@@ -92,8 +88,8 @@ Codex 汇报结果和证据
 
 默认分工：
 
-- Codex 拥有写文件、跑测试、构建、git、最终验证。
-- ChatGPT 拥有深度推理、大上下文阅读、视觉/PDF/截图分析和独立 review。
+- Codex 负责写文件、跑测试、构建、git 和最终验证。
+- ChatGPT 负责深度推理、大上下文阅读、视觉/PDF/截图分析和独立 review。
 - 本地桥默认只暴露一个明确项目目录，并且默认只读。
 
 ## 安装
@@ -165,7 +161,7 @@ powershell -ExecutionPolicy Bypass -File $controller -Action Configure -ProjectR
 powershell -ExecutionPolicy Bypass -File $controller -Action Configure -ProjectRoot "C:\Users\you\DevSpace" -AllowedRoots "C:\Users\you\DevSpace;D:\Projects;E:\Reference" -Tunnel cloudflare-worker -PublicBaseUrl https://bridge.example.workers.dev
 ```
 
-controller 会用 profile schema v2 保存该列表，并在后续 `On`、`Restart`、`Reboot` 中持续传给 DevSpace，不会退回成单一 root。
+controller 会用 profile schema v2 保存该列表，并在后续 `On`、`Restart`、`Reboot` 中持续传给 DevSpace，不会退化为单一 root。
 
 ### 2. Worker 模式先保存 KV 凭据
 
@@ -181,7 +177,7 @@ powershell -ExecutionPolicy Bypass -File "$skill\scripts\set_cf_api_config.ps1" 
 
 稳定 Worker 与 external 模式的公网 base URL 必须使用 HTTPS，且不能嵌入账号密码、查询参数或 fragment。
 
-凭据脚本会读取刚保存的 controller profile，把稳定 Worker URL 和 KV namespace 同步到不含认证凭据、但仍应留在本机且不得提交的 `worker-proxy.json`。独立配置时也可以显式传 `-WorkerBaseUrl`。
+凭据脚本会读取刚保存的 controller profile，把稳定 Worker URL 和 KV namespace 同步到不含认证凭据、但仍应留在本机且禁止提交到版本库的 `worker-proxy.json`。独立配置时也可以显式传 `-WorkerBaseUrl`。
 
 ### 3. 日常开关与健康检查
 
@@ -211,7 +207,7 @@ powershell -ExecutionPolicy Bypass -File "$skill\scripts\restart_task.ps1" -Acti
 
 它没有自动触发器，只调用固定的 `Reboot`；`MultipleInstances=IgnoreNew` 会避免并发重启。`Run` 只是异步提交请求，不代表已经成功。最终要查看 `%LOCALAPPDATA%\devspace-bridge\controller-result.json`，再运行 controller `Doctor`。
 
-默认任务使用当前用户的 `Interactive`、`Limited` 身份，因此该用户必须已登录。它解决“桥不能自己把自己拉起”的可靠性问题，不是安全隔离。真正的授权边界需要专门的最小权限 Windows 账号，并用 ACL 隔离脚本、状态、日志和凭据。
+默认任务使用当前用户的 `Interactive`、`Limited` 身份，因此该用户必须已登录。它解决的是“桥无法自行重启”的可靠性问题，不是安全隔离。真正的授权边界需要专门的最小权限 Windows 账号，并用 ACL 隔离脚本、状态、日志和凭据。
 
 ### 5. 改锁 / Rotate（怀疑被别人连上时）
 
@@ -219,11 +215,11 @@ powershell -ExecutionPolicy Bypass -File "$skill\scripts\restart_task.ps1" -Acti
 powershell -ExecutionPolicy Bypass -File "$skill\scripts\local_bridge.ps1" -Action Rotate
 ```
 
-`Rotate` 是“一键改锁”：停桥（清内存 token）→ 删除 `oauth-state.json`（吊销已签发的 token）→ 生成新的 Owner password。之后用 controller `On`，再用新密码重新授权你自己的 ChatGPT。任何“是不是被别人连了”的疑虑，跑它就对了。
+`Rotate` 是“一键改锁”：停桥（清内存 token）→ 删除 `oauth-state.json`（吊销已签发的 token）→ 生成新的 Owner password。之后用 controller `On`，再用新密码重新授权你自己的 ChatGPT。只要怀疑被未授权连接，执行该命令即可。
 
 ## 让 ChatGPT 不用每次重新设置
 
-该关桥的理由很简单：不用的公网端点就是白送的攻击面。而大家宁愿一直开着的理由同样简单：Quick Tunnel URL 重启就变，关一次就要回 ChatGPT 里改 app URL、再走一遍授权。只要在会变的那一层前面钉一个不变的层，这笔代价就没了：
+该关桥的理由很简单：闲置的公网端点纯粹是在增加攻击面。而大家宁愿一直开着的理由同样简单：Quick Tunnel URL 重启就变，关一次就要回 ChatGPT 里改 app URL、再走一遍授权。只要在会变的那一层前面加一个固定层，这笔代价就消失了：
 
 ```text
 ChatGPT app URL        固定，只配一次
@@ -243,7 +239,7 @@ ChatGPT app URL        固定，只配一次
 
 全程不用重建 app、不用改 URL、不用重新授权。`Off` 特意保留 app 配置和授权信息，就是为了守住这一点；真要吊销时用 `Rotate`。
 
-裸 Quick Tunnel URL 只适合第一次 smoke test，不适合长期存进 app。
+直接使用 Quick Tunnel URL 只适合第一次 smoke test，不适合长期存进 app。
 
 ## 在 ChatGPT 里创建 App
 
@@ -306,7 +302,7 @@ ChatGPT 会打开授权页面。
 - 复杂实现任务
 - 需要 Codex 一边改一边验证
 - 希望 ChatGPT 给架构建议、审查和第二意见
-- 质量和稳妥比省 token 更重要
+- 质量和可靠性比省 token 更重要
 
 例子：
 
@@ -342,9 +338,9 @@ ChatGPT 会打开授权页面。
 
 要点：
 
-- 按边际成本路由：只有当某块活能省下远超“一次慢速桥往返”的 Codex token 时，才交给 ChatGPT。
+- 按边际成本路由：只有当某项任务能省下远超“一次慢速桥往返”的 Codex token 时，才交给 ChatGPT。
 - 需要多 subagent 时，ChatGPT 可以直接充当 subagent 池，fan-out 不占 Codex 配额；Codex 始终是唯一的总控 + 集成 + 验证。
-- 可选：你显式授予 `L3` 后，ChatGPT 可经桥直接写代码并自验证，Codex 只做集成 pass（读 diff + 跑测试），仍掌管 git 和最终结论。
+- 可选：你显式授予 `L3` 后，ChatGPT 可经桥直接写代码并自验证，Codex 只负责集成验证（读 diff + 跑测试），仍掌管 git 和最终结论。
 
 例子：
 
@@ -396,12 +392,12 @@ ChatGPT 会打开授权页面。
 
 ## 安全模型
 
-要对信任边界诚实：一旦你给 ChatGPT app 过了 OAuth 授权，桥就授予了对你机器的文件读写和 shell 执行。「这是一份 skill，不是一个沙箱」在这里是关键前提——`L0`–`L5` 只是 Codex 叮嘱 ChatGPT 遵守的**策略**，`run_shell` 不受 root 约束，所以被授权的 app 实际上等于本地用户级代码执行。真正被强制的边界只有三条，其中两条来自 DevSpace：OAuth 授权（一个强随机 Owner password）和文件工具的窄 `allowedRoots`；第三条是本仓库提供的——用 controller `Off` 关掉可达性。这也是为什么「`Off` 足够顺手」比那张等级表更重要。
+先明确真实的信任边界：一旦完成 ChatGPT app 的 OAuth 授权，桥就授予了对你机器的文件读写和 shell 执行。「这是一份 skill，不是一个沙箱」在这里是关键前提——`L0`–`L5` 只是 Codex 要求 ChatGPT 遵守的**策略**，并非桥强制执行；`run_shell` 不受 root 约束，所以被授权的 app 实际上等于本地用户级代码执行。真正被强制的边界只有三条，其中两条来自 DevSpace：OAuth 授权（一个强随机 Owner password）和文件工具的窄 `allowedRoots`；第三条是本仓库提供的——用 controller `Off` 切断访问途径。这也是为什么「`Off` 足够顺手」比那张等级表更重要。
 
 实操建议：
 
 - **不用时就用 controller `Off`**——常驻的公网端点是主要攻击面。
-- root 要窄、不含密钥；要更强隔离就跑在最小权限账号或一次性 VM 里。
+- root 要窄、不含密钥；要实现更强隔离，请运行在最小权限账号或一次性 VM 中。
 - 查看 controller `Doctor.securityWarnings`；磁盘根目录、完整用户目录及其父目录会被标记为范围过宽。
 - 一旦怀疑别人连上，跑 `-Action Rotate` 吊销所有 token 并改锁。
 - controller 状态和日志包含路径、PID 与 tunnel URL，分享前先脱敏。
@@ -419,7 +415,7 @@ ChatGPT 会打开授权页面。
 
 ### 为什么生命周期要放在桥之外？
 
-因为已经停掉的进程没法自己重启，而通道刚断掉的 agent 也没法让它重启。controller 是 agent 调用的独立脚本；可选的计划任务是第二个入口，在连 controller 都调不动时由 Windows 来调。
+因为已经停掉的进程无法自行重启，而通道刚断掉的 agent 也无法让它重启。controller 是 agent 调用的独立脚本；可选的计划任务是第二个入口，在无法调用 controller 时由 Windows 触发。
 
 ### 每次重启是不是都要重配 ChatGPT app？
 

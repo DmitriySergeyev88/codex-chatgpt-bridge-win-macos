@@ -11,10 +11,6 @@
 </p>
 
 <p align="center">
-  The MCP bridge itself is <a href="https://github.com/Waishnav/devspace">DevSpace</a> (upstream). This repo provides an agent skill and out-of-process control layer so an agent can turn the bridge on, off, and reboot it without relinking the ChatGPT app.
-</p>
-
-<p align="center">
   <a href="https://github.com/Zhenyu98/codex-chatgpt-bridge/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Zhenyu98/codex-chatgpt-bridge?style=for-the-badge&logo=github"></a>
   <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge"></a>
   <img alt="Windows PowerShell" src="https://img.shields.io/badge/Windows-PowerShell-blue?style=for-the-badge&logo=windows&logoColor=white">
@@ -41,13 +37,13 @@
 
 The MCP bridge itself is [DevSpace](https://github.com/Waishnav/devspace) — an upstream open-source project you install from npm as `@waishnav/devspace`. It owns the MCP server, OAuth, the file tools, and `run_shell`. This repository does not fork it, patch it, or wrap it in a second server.
 
-What this repository adds are the two things missing when you actually put DevSpace between a coding agent and ChatGPT: **a skill that tells the agent how to use it**, and **control scripts that live outside the bridge process**.
+This repository adds the two things missing when you put DevSpace between a coding agent and ChatGPT: **a skill that tells the agent how to use it**, and **control scripts that live outside the bridge process**.
 
 | Layer | Owner | Responsibility |
 |---|---|---|
 | MCP bridge | DevSpace (upstream) | MCP server, OAuth, file tools, `run_shell` |
 | Skill | this repo — `SKILL.md` | when to hand a task to ChatGPT, permission levels `L0`–`L5`, task-packet and manifest formats, approval gates |
-| Control layer | this repo — `scripts/bridge_controller.ps1` | desired-state `On` / `Off` / `Reboot` as one mutex-protected, health-verified transaction |
+| Control layer | this repo — `scripts/bridge_controller.ps1` | desired-state `On` / `Off` / `Reboot`, each a mutex-protected, health-verified transaction |
 | External recovery | this repo — `scripts/restart_task.ps1` | an on-demand Windows scheduled task that can reboot a bridge the agent can no longer reach |
 | Link stability | this repo — `scripts/set_cf_api_config.ps1` | refreshes the stable Worker upstream so the public MCP URL never moves |
 
@@ -57,7 +53,7 @@ The control layer is deliberately external. A bridge cannot restart itself once 
 
 ## Why
 
-Two separate costs make a long agent session expensive. One is quota: planning, re-reading, and repeated design burn Codex tokens, so this skill routes that work to ChatGPT and keeps Codex on execution and verification. The other is setup churn: a bridge that changes its public URL on every restart makes you re-edit the app URL and re-authorize, which is why people leave it running when they should be closing it.
+Two separate costs make a long agent session expensive. One is quota: planning, re-reading, and repeated design iterations burn Codex tokens, so this skill routes that work to ChatGPT and keeps Codex on execution and verification. The other is setup churn: a bridge that changes its public URL on every restart makes you re-edit the app URL and re-authorize, which is why people leave it running when they should be closing it.
 
 | Before | After |
 |---|---|
@@ -65,7 +61,7 @@ Two separate costs make a long agent session expensive. One is quota: planning, 
 | Codex spends quota planning, re-reading, and iterating | ChatGPT plans and reviews; Codex executes one task at a time |
 | Every restart rotates the tunnel URL, so you re-edit the ChatGPT app URL and re-authorize | The stable public URL stays pinned; `Reboot` refreshes the upstream behind it and the app link survives |
 | The agent stops the bridge and has no way to bring it back | `Reboot` is one verified transaction, and an external scheduled task can run it from outside the process |
-| `Off` is indistinguishable from a crash, so recovery tooling fights you | `Off` records intentional shutdown, and `Reboot` refuses to reopen it |
+| `Off` is indistinguishable from a crash, so recovery tooling fights you | `Off` records an intentional shutdown, and `Reboot` refuses to override it |
 | A remote tool with unclear reach into your machine | A narrow, OAuth-gated root that is off by default and re-keyable |
 
 ## Quick Start
@@ -76,7 +72,7 @@ cd codex-chatgpt-bridge
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-If a copy is already installed, the installer moves it to a timestamped backup before copying the new skill. Use `-ForceOverwrite` only when you intentionally want to discard that installed copy. Add `-RegisterRestartTask` only if you also want the optional, on-demand Reboot task.
+If a copy is already installed, the installer moves it to a timestamped backup before copying the new skill. Use `-ForceOverwrite` only when you want to discard that installed copy. Add `-RegisterRestartTask` only if you also want the optional, on-demand Reboot task.
 
 Expected success signal:
 
@@ -100,7 +96,7 @@ npm install -g @waishnav/devspace
 
 ## Agent Setup
 
-Copy this to Codex, Claude Code, Cursor, or another coding agent:
+Copy this prompt into Codex, Claude Code, Cursor, or another coding agent:
 
 ```text
 Read https://github.com/Zhenyu98/codex-chatgpt-bridge/blob/main/agent-setup.md and follow it to install and configure codex-chatgpt-bridge for me.
@@ -114,7 +110,7 @@ See [agent-setup.md](agent-setup.md) for the full copy-paste prompt, prerequisit
 - `TOKEN_SAVING`: Codex acts mostly as the orchestrator. Safe non-mutating reading, broad review, and synthesis go to ChatGPT whenever they save Codex tokens.
 - `CHATGPT_ARCHITECT`: the planning-inverted mode for long, continuous builds. ChatGPT is the architect/manager (spec, design, task decomposition, per-task prompts, review); Codex executes one small task at a time and verifies. With your explicit `L3` grant, ChatGPT can also write over the bridge while Codex integrates.
 
-The router picks by marginal cost: a unit of work goes to ChatGPT when it saves far more Codex tokens than one slow bridge round-trip. When a plan needs parallel subagents, ChatGPT can serve as the subagent pool so the fan-out stays off Codex quota, while Codex remains the single orchestrator that integrates and verifies.
+The router picks by marginal cost: a unit of work goes to ChatGPT when it saves far more Codex tokens than the cost of one slow bridge round-trip. When a plan needs parallel subagents, ChatGPT can serve as the subagent pool so the fan-out stays off Codex quota, while Codex remains the single orchestrator that integrates and verifies.
 
 ## Bridge Controller
 
@@ -136,7 +132,7 @@ powershell -ExecutionPolicy Bypass -File $controller -Action Doctor
 powershell -ExecutionPolicy Bypass -File "$skill\scripts\local_bridge.ps1" -Action Rotate
 ```
 
-The controller is the external control layer, and it is what an agent should call for every normal lifecycle operation. It keeps a non-secret desired-state profile separate from transient runtime state, so the difference between "off on purpose" and "died" is recorded rather than guessed. `On` records an intentional running state. `Off` records an intentional stopped state and closes the service and tunnel while preserving the ChatGPT app configuration. `Restart` and `Reboot` are the same mutex-protected transaction: stop, start, refresh Worker KV when configured, and verify the local, Quick Tunnel, and stable Worker endpoints before success. A Reboot refuses to reopen a bridge intentionally turned off with `Off`; use `On` to open it again.
+The controller is the external control layer and the primary entry point for all normal lifecycle operations. It keeps a non-secret desired-state profile separate from transient runtime state, so the difference between "off on purpose" and "died" is recorded rather than guessed. `On` records an intentional running state. `Off` records an intentional stopped state and closes the service and tunnel while preserving the ChatGPT app configuration. `Restart` and `Reboot` are the same mutex-protected transaction: stop, start, refresh Worker KV when configured, and verify the local, Quick Tunnel, and stable Worker endpoints before success. A Reboot refuses to reopen a bridge intentionally turned off with `Off`; use `On` to open it again.
 
 DevSpace's own `Start` and `Stop` remain available as recovery primitives, but they do not own the desired-state contract and should not be an agent's default. Drive the lifecycle through `On`, `Off`, and `Reboot`.
 
@@ -158,7 +154,7 @@ The controller stores the list in profile schema v2 and forwards it to DevSpace 
 
 The credential helper reads the saved Worker URL from the controller profile and writes the matching non-credential operational metadata to `worker-proxy.json` alongside the DPAPI-protected credential. The file still contains your Worker URL and KV namespace ID: keep it local and out of git. You can override the URL explicitly with `-WorkerBaseUrl` for a standalone setup.
 
-The helper verifies a DPAPI encrypt/decrypt round trip before saving and removes an older plaintext `cf-api.json` after a successful migration. Controller-driven `On` / `Reboot` refuses plaintext legacy credentials. If `-InstallCloudflared` downloads the tunnel binary, the bridge verifies a valid Windows Authenticode signature from Cloudflare, Inc. before installing or running it.
+The helper verifies a DPAPI encrypt/decrypt round trip before saving and removes an older plaintext `cf-api.json` after a successful migration. Controller-driven `On` / `Reboot` rejects plaintext legacy credentials. If `-InstallCloudflared` downloads the tunnel binary, the bridge verifies a valid Windows Authenticode signature from Cloudflare, Inc. before installing or running it.
 
 Stable Worker and external public base URLs must use HTTPS and cannot contain embedded credentials, a query string, or a fragment.
 
@@ -169,7 +165,7 @@ powershell -ExecutionPolicy Bypass -File "$skill\scripts\restart_task.ps1" -Acti
 powershell -ExecutionPolicy Bypass -File "$skill\scripts\restart_task.ps1" -Action Run
 ```
 
-`Run` only requests the task asynchronously. Confirm the final result in `%LOCALAPPDATA%\devspace-bridge\controller-result.json`, then run controller `Doctor`. The default task uses the same interactive Windows user, so that user must be logged on; it improves recovery reliability but is not a security boundary. True isolation needs a separate least-privilege OS account plus ACL-separated scripts, state, logs, and credentials.
+`Run` only requests the task asynchronously. Confirm the final result in `%LOCALAPPDATA%\devspace-bridge\controller-result.json`, then run controller `Doctor`. The default task uses the same interactive Windows user, so that user must be logged on; this improves recovery reliability but is not a security boundary. True isolation requires a separate least-privilege OS account plus ACL-separated scripts, state, logs, and credentials.
 
 `Rotate` remains the panic button: it stops the bridge, revokes all issued OAuth tokens, and mints a new Owner password. Run it after suspected unauthorized access, then use controller `On` and re-authorize.
 
@@ -193,13 +189,13 @@ local DevSpace MCP       bound to your allowed roots
 Off when idle  →  On when working  →  Reboot when something breaks
 ```
 
-with no app recreation, no URL edit, and no reauthorization in between. `Off` preserves the app configuration and authorization material precisely to keep that true; use `Rotate` when you actually want to revoke.
+with no app recreation, no URL edits, and no reauthorization in between. `Off` preserves the app configuration and authorization material precisely to keep that true; use `Rotate` when you actually want to revoke.
 
-A raw Quick Tunnel URL is fine for a first smoke test and a poor choice for a saved app. The full walkthrough for creating the ChatGPT app (developer mode, app URL, OAuth, smoke test) is in [README_zh.md](README_zh.md).
+A raw Quick Tunnel URL is fine for a first smoke test but a poor choice for a saved app. The full walkthrough for creating the ChatGPT app (developer mode, app URL, OAuth, smoke test) is in [README_zh.md](README_zh.md).
 
 ## Security Model
 
-Be honest about the trust boundary: once you OAuth-authorize the ChatGPT app, the bridge grants file read/write and shell execution on your machine. Being a skill rather than a sandbox is the load-bearing caveat here — the `L0`–`L5` levels are policy Codex instructs ChatGPT to follow, they are guidance, and `run_shell` is not confined to the root, so an authorized app effectively holds local-user code execution. Only three boundaries are actually enforced, and two of them are DevSpace's: OAuth approval (a strong random Owner password) and the narrow `allowedRoots` for file tools. The third is this repo's contribution — closing reachability with controller `Off`, which is why an easy `Off` matters more than the level table.
+Be honest about the trust boundary: once you OAuth-authorize the ChatGPT app, the bridge grants file read/write and shell execution on your machine. Being a skill rather than a sandbox is the load-bearing caveat here: the `L0`–`L5` levels are policy that Codex instructs ChatGPT to follow, not something the bridge enforces. Because `run_shell` is not confined to the root, an authorized app effectively holds local-user code execution. Only three boundaries are actually enforced, and two of them are DevSpace's: OAuth approval (a strong random Owner password) and the narrow `allowedRoots` for file tools. The third is this repo's contribution — closing reachability with controller `Off`, which is why an easy `Off` matters more than the level table.
 
 Practical rules:
 
@@ -227,7 +223,7 @@ Not with a stable Worker or proxy in front. See [Reboot Without Relinking](#rebo
 
 **Can ChatGPT run anything on my machine?**
 
-Once you OAuth-authorize the app, the bridge allows file read/write and shell within your setup. `run_shell` is not sandboxed, so treat an authorized app as local-user execution: keep the root narrow, use controller `Off` when idle, and use `Rotate` to revoke access.
+Once you OAuth-authorize the app, the bridge allows file read/write and shell execution within your setup. `run_shell` is not sandboxed, so treat an authorized app as local-user execution: keep the root narrow, use controller `Off` when idle, and use `Rotate` to revoke access.
 
 **Does `Off` revoke ChatGPT's access?**
 
@@ -239,7 +235,7 @@ They remain recovery primitives, but they do not own the persistent desired-stat
 
 **Will ChatGPT edit my source directly?**
 
-In the default advice profile, Codex applies and verifies every change. With your explicit `L3` grant, ChatGPT writes over the bridge and Codex reviews the diff, runs an independent check, and owns git plus the final claim.
+In the default advice profile, Codex applies and verifies every change. With your explicit `L3` grant, ChatGPT writes over the bridge and Codex reviews the diff, runs an independent check, and owns Git operations plus the final verdict.
 
 **The Quick Tunnel URL keeps changing.**
 
