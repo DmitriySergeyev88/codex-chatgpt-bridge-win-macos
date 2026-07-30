@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  MCP 桥本身是上游开源项目 <a href="https://github.com/Waishnav/devspace">DevSpace</a>。本仓库提供面向 DevSpace 的 agent skill 与进程外控制层，让 agent 能自己开、关、重启桥，并且不必重新连 ChatGPT app。
+</p>
+
+<p align="center">
   <a href="https://github.com/Zhenyu98/codex-chatgpt-bridge/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Zhenyu98/codex-chatgpt-bridge?style=for-the-badge&logo=github"></a>
   <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge"></a>
   <img alt="Windows PowerShell" src="https://img.shields.io/badge/Windows-PowerShell-blue?style=for-the-badge&logo=windows&logoColor=white">
@@ -18,8 +22,10 @@
 </p>
 
 <p align="center">
+  <a href="#这是什么">这是什么</a> ·
   <a href="#适合谁">适合谁</a> ·
   <a href="#安装">安装</a> ·
+  <a href="#让-chatgpt-不用每次重新设置">免重连</a> ·
   <a href="#路由模式">路由模式</a> ·
   <a href="#安全模型">安全模型</a> ·
   <a href="#常见问题">常见问题</a> ·
@@ -32,12 +38,30 @@
 
 让 Codex 和 ChatGPT 像两个协作代理一样分工：Codex 负责本地执行，ChatGPT 负责深度思考、审查和大上下文理解。
 
+## 这是什么
+
+MCP 桥本身是上游开源项目 [DevSpace](https://github.com/Waishnav/devspace)，从 npm 安装为 `@waishnav/devspace`，由它提供 MCP server、OAuth、文件工具和 `run_shell`。本仓库不 fork、不打补丁，也不在它外面再套一层 server。
+
+本仓库补的是把 DevSpace 真正放到「coding agent ↔ ChatGPT」之间以后缺的两样东西：**一份告诉 agent 该怎么用它的 skill**，以及**跑在桥进程之外的控制脚本**。
+
+| 层 | 归属 | 负责什么 |
+|---|---|---|
+| MCP 桥 | DevSpace（上游） | MCP server、OAuth、文件工具、`run_shell` |
+| Skill | 本仓库 — `SKILL.md` | 什么活该交给 ChatGPT、`L0`–`L5` 权限等级、任务包与 manifest 格式、人工审批门 |
+| 控制层 | 本仓库 — `scripts/bridge_controller.ps1` | 把 `On` / `Off` / `Reboot` 做成一个带互斥锁、带健康校验的期望状态事务 |
+| 外部恢复 | 本仓库 — `scripts/restart_task.ps1` | 按需的 Windows 计划任务，agent 已经够不到桥时也能把它重启起来 |
+| 链路稳定 | 本仓库 — `scripts/set_cf_api_config.ps1` | 刷新稳定 Worker 的 upstream，让对外的 MCP URL 始终不变 |
+
+上表中的仓库路径都相对于 [skills/codex-chatgpt-bridge/](skills/codex-chatgpt-bridge)，也就是 `install.ps1` 复制到 `%USERPROFILE%\.codex\skills\codex-chatgpt-bridge` 的那一份。
+
+控制层刻意放在桥之外。桥停了之后没法自己把自己拉起来；刚把自己的通道关掉的 agent 更没有回路。所以生命周期交给 agent 调用的脚本，再加一个「agent 也调不动时由 Windows 来调」的计划任务。
+
 这个项目的目标很简单：
 
 - 复杂问题交给 ChatGPT 想清楚。
 - 本地改文件、跑测试、构建、git diff 仍由 Codex 执行。
 - 大项目阅读和长日志分析尽量交给 ChatGPT，节省 Codex token。
-- 本地 MCP 通道默认关闭，只在需要时打开，用完关闭。
+- 本地 MCP 通道默认关闭，只在需要时打开，用完关闭——而且开关多少次都不用回 ChatGPT 里重配 app。
 
 ## 适合谁
 
@@ -106,7 +130,7 @@ powershell -ExecutionPolicy Bypass -File "$skill\scripts\local_bridge.ps1" -Acti
 
 `Doctor` 会检查本地桥所需的 Node/npm、Git Bash、CLI 依赖等环境。
 
-如缺少底层本地 MCP 桥 CLI，可按脚本提示安装：
+如缺少底层本地 MCP 桥 CLI，可按脚本提示安装。本仓库驱动的就是这个上游 CLI，不自带实现：
 
 ```powershell
 npm install -g @waishnav/devspace
@@ -199,23 +223,27 @@ powershell -ExecutionPolicy Bypass -File "$skill\scripts\local_bridge.ps1" -Acti
 
 ## 让 ChatGPT 不用每次重新设置
 
-如果想做到“平时关闭服务，用时打开；ChatGPT 端不用每次重建 app”，关键是使用稳定 URL。
-
-推荐方案：
+该关桥的理由很简单：不用的公网端点就是白送的攻击面。而大家宁愿一直开着的理由同样简单：Quick Tunnel URL 重启就变，关一次就要回 ChatGPT 里改 app URL、再走一遍授权。只要在会变的那一层前面钉一个不变的层，这笔代价就没了：
 
 ```text
-ChatGPT app 固定 URL
+ChatGPT app URL        固定，只配一次
   ↓
-稳定 Worker / 自定义代理 / 稳定外部 tunnel
+稳定 Worker / 代理      域名固定，upstream 存在 KV 里
   ↓
-当前本地 quick tunnel
+当前 Quick Tunnel      每次重启随便变
   ↓
-本地 MCP 服务
+本地 DevSpace MCP      只绑定你授权的 roots
 ```
 
-这样 ChatGPT app 里保存的是固定地址。每次本地重启后，只需要更新稳定代理背后的 upstream，而不需要重新创建 ChatGPT app。
+`On` 和 `Reboot` 会把新的 upstream 写进 Worker KV，并且只有本地、Quick Tunnel、稳定 Worker 三层都满足 `200/401` 健康合约才算成功。ChatGPT app 完全感知不到中间的变化，所以日常就是：
 
-不推荐长期使用裸 Quick Tunnel URL 作为 ChatGPT app 地址，因为它重启后可能变化。
+```text
+不用时 Off  →  要用时 On  →  出问题时 Reboot
+```
+
+全程不用重建 app、不用改 URL、不用重新授权。`Off` 特意保留 app 配置和授权信息，就是为了守住这一点；真要吊销时用 `Rotate`。
+
+裸 Quick Tunnel URL 只适合第一次 smoke test，不适合长期存进 app。
 
 ## 在 ChatGPT 里创建 App
 
@@ -368,7 +396,7 @@ ChatGPT 会打开授权页面。
 
 ## 安全模型
 
-要对信任边界诚实：一旦你给 ChatGPT app 过了 OAuth 授权，桥就授予了对你机器的文件读写和 shell 执行。`L0`–`L5` 只是 Codex 叮嘱 ChatGPT 遵守的**策略**，**不是沙箱**——`run_shell` 不受 root 约束，所以被授权的 app 实际上等于本地用户级代码执行。真正被强制的边界只有三条：OAuth 授权（一个强随机 Owner password）、文件工具的窄 `allowedRoots`、以及停桥。
+要对信任边界诚实：一旦你给 ChatGPT app 过了 OAuth 授权，桥就授予了对你机器的文件读写和 shell 执行。「这是一份 skill，不是一个沙箱」在这里是关键前提——`L0`–`L5` 只是 Codex 叮嘱 ChatGPT 遵守的**策略**，`run_shell` 不受 root 约束，所以被授权的 app 实际上等于本地用户级代码执行。真正被强制的边界只有三条，其中两条来自 DevSpace：OAuth 授权（一个强随机 Owner password）和文件工具的窄 `allowedRoots`；第三条是本仓库提供的——用 controller `Off` 关掉可达性。这也是为什么「`Off` 足够顺手」比那张等级表更重要。
 
 实操建议：
 
@@ -384,6 +412,18 @@ ChatGPT 会打开授权页面。
 想让 agent（Codex、Claude Code 等）替你安装配置，见 [agent-setup.md](agent-setup.md)：开头就是复制即用的提示词和安全默认。
 
 ## 常见问题
+
+### 这是 DevSpace 的 fork 吗？
+
+不是。DevSpace 从 npm 原样安装为 `@waishnav/devspace`，MCP 桥一直是它。本仓库是 agent 读的那份 skill 加上它调用的那些脚本，不替换、不打补丁、也不代理上游 server。
+
+### 为什么生命周期要放在桥之外？
+
+因为已经停掉的进程没法自己重启，而通道刚断掉的 agent 也没法让它重启。controller 是 agent 调用的独立脚本；可选的计划任务是第二个入口，在连 controller 都调不动时由 Windows 来调。
+
+### 每次重启是不是都要重配 ChatGPT app？
+
+前面挂了稳定 Worker 或代理就不用。见[让 ChatGPT 不用每次重新设置](#让-chatgpt-不用每次重新设置)：app URL 固定不动，`Reboot` 只换它背后的 upstream。
 
 ### 关闭后 ChatGPT 还会不会访问本地项目？
 
@@ -440,7 +480,7 @@ tests/
 
 ## 致谢
 
-- This project builds on the open-source [DevSpace](https://github.com/Waishnav/devspace) project by Waishnav.
+- 本 skill 驱动的 MCP 桥是 Waishnav 的开源项目 [DevSpace](https://github.com/Waishnav/devspace)。
 - Special thanks to [LINUX.DO](https://linux.do/) for providing a promotion platform.
 
 ## 许可证

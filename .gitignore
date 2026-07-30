@@ -4,6 +4,8 @@ Thumbs.db
 *.jsonl
 *.tmp
 *.bak
+*.diff
+*.patch
 node_modules/
 .env
 .env.*
