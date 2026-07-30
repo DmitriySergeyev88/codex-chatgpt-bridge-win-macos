@@ -75,8 +75,8 @@ Owner password from your local `auth.json` yourself — never share it. /
    `Doctor` afterward. The default Interactive task requires the same user to be logged on and
    is reliability isolation, not a security boundary. / 计划任务需单独批准；无自动触发；运行后要查结果文件和 Doctor；
    默认 Interactive 任务要求用户已登录，只解决可靠性，不提供权限隔离。
-6. Follow the README app-setup and begin with the read-only smoke test. /
-   最后按 README 创建 app，并先做只读 smoke test。
+6. Follow [chatgpt-app-setup.md](chatgpt-app-setup.md) and begin with the read-only smoke test. /
+   最后按 [chatgpt-app-setup.md](chatgpt-app-setup.md) 创建 app，并先做只读 smoke test。
 
 ## Success Signal / 成功标志
 

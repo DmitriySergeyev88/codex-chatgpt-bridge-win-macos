@@ -22,6 +22,7 @@
   <a href="#适合谁">适合谁</a> ·
   <a href="#安装">安装</a> ·
   <a href="#让-chatgpt-不用每次重新设置">免重连</a> ·
+  <a href="chatgpt-app-setup.md">创建 App</a> ·
   <a href="#路由模式">路由模式</a> ·
   <a href="#安全模型">安全模型</a> ·
   <a href="#常见问题">常见问题</a> ·
@@ -243,53 +244,9 @@ ChatGPT app URL        固定，只配一次
 
 ## 在 ChatGPT 里创建 App
 
-下面是通用流程。ChatGPT UI 可能会随版本变化，但核心配置项基本一致。
+完整流程单独放在 **[chatgpt-app-setup.md](chatgpt-app-setup.md)**：开发者模式、app URL、OAuth 授权（Owner password 从哪读）、只读 smoke test，以及常见问题排查。
 
-### 1. 打开开发者模式
-
-在 ChatGPT 中进入：
-
-```text
-Settings → Apps → Advanced settings
-```
-
-打开 Developer mode。
-
-### 2. 创建 App
-
-进入：
-
-```text
-Settings → Apps → Manage → Create app
-```
-
-建议填写：
-
-```text
-Name: Codex ChatGPT Bridge
-URL: 你的 mcpUrl，例如 https://your-stable-domain.example.com/mcp
-Auth: OAuth
-```
-
-如果只是临时测试，也可以先填脚本输出的 Quick Tunnel `mcpUrl`。但下次重启 tunnel 后，可能需要改 URL。
-
-### 3. 授权连接
-
-ChatGPT 会打开授权页面。
-
-只在你确认当前项目目录正确、暴露范围足够窄时继续授权。
-
-不要把 owner password、token、OAuth secret、浏览器 cookie、API key 粘贴到公开聊天里。
-
-### 4. 做只读 smoke test
-
-授权后，先让 ChatGPT 做一个只读测试：
-
-```text
-请通过 Codex ChatGPT Bridge 打开当前 workspace，只列出顶层文件，不要写文件，不要运行修改性命令。
-```
-
-确认能读到正确项目目录后，再进行正式任务。
+授权前请记住两点：先确认暴露的项目目录正确且足够窄；不要把 Owner password、token、OAuth secret、cookie、API key 贴进聊天或截图。
 
 ## 路由模式
 

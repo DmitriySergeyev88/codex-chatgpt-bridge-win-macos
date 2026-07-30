@@ -23,6 +23,7 @@
   <a href="#quick-start">Quick Start</a> ·
   <a href="#agent-setup">Agent Setup</a> ·
   <a href="#reboot-without-relinking">Reboot Without Relinking</a> ·
+  <a href="chatgpt-app-setup.md">App Setup</a> ·
   <a href="#routing-modes">Routing</a> ·
   <a href="#security-model">Security</a> ·
   <a href="#faq">FAQ</a> ·
@@ -191,7 +192,13 @@ Off when idle  →  On when working  →  Reboot when something breaks
 
 with no app recreation, no URL edits, and no reauthorization in between. `Off` preserves the app configuration and authorization material precisely to keep that true; use `Rotate` when you actually want to revoke.
 
-A raw Quick Tunnel URL is fine for a first smoke test but a poor choice for a saved app. The full walkthrough for creating the ChatGPT app (developer mode, app URL, OAuth, smoke test) is in [README_zh.md](README_zh.md).
+A raw Quick Tunnel URL is fine for a first smoke test but a poor choice for a saved app.
+
+## ChatGPT App Setup
+
+The full walkthrough lives in **[chatgpt-app-setup.md](chatgpt-app-setup.md)**: developer mode, the app URL, OAuth authorization (including where to read the Owner password from), the read-only smoke test, and a troubleshooting table.
+
+Two rules before you approve anything: confirm the exposed project root is correct and narrow, and never paste the Owner password, tokens, OAuth secrets, cookies, or API keys into a chat message or a screenshot.
 
 ## Security Model
 
