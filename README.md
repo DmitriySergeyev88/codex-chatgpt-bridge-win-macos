@@ -181,3 +181,17 @@ rm ~/Library/LaunchAgents/org.codex.ai-bridge.server.plist ~/Library/LaunchAgent
 ```
 
 Тесты проверяют project isolation, запрет secrets/traversal/symlink/hardlink/FIFO, подавление external Git diff, идемпотентность, crash recovery, FIX/ACCEPT, следующие задания, реальный HTTP MCP, OAuth/PKCE, replay кода, refresh/revoke и сохранение токенов после реконструкции сервера. Изолированная настоящая Codex-проверка описана отдельно в `VALIDATION.md`. Она не является product acceptance iiko.
+
+
+## Secure MCP Tunnel на macOS
+
+
+Локальный MCP можно подключить из ChatGPT через официальный `tunnel-client`, без публичного входящего адреса. Туннель должен быть связан с вашей Platform organization и рабочим пространством ChatGPT. Runtime API key хранится в подтверждённом игнорируемом `.env.local` как `OPENAI_API_KEY`, с правами `0600`; OAuth owner/encryption остаются в Keychain. Не помещайте ключ в YAML или аргументы процесса.
+
+Локальная установка использует `.runtime/tunnel-client` и `.runtime/tunnel.yaml`; LaunchAgent `org.codex.ai-bridge.tunnel` запускает `.venv/bin/python -m bridge.tunnel`. Supervisor читает существующий `.runtime/desired-state.json`: Off останавливает туннель, On запускает его, перезапуск Mac сохраняет выбранное состояние. Ошибки и журналы находятся в `.runtime/tunnel-supervisor.log` и `.runtime/tunnel.log`; сырое HTTP-логирование выключено.
+
+Для OAuth с локальным HTTP-сервером настройка tunnel-client разрешает HTTP только для выбранных локальных маршрутов (`harpoon.allow_plaintext_http: true`), отключает автоматическое включение private IP hosts (`harpoon.hosts_include_private: false`). Разрешённые OAuth-маршруты обнаруживаются из метаданных bridge. MCP сохраняет обязательную авторизацию. Сервер отдаёт одинаковые метаданные с завершающим `/` и без него, чтобы избежать запрещённого перенаправления в relay.
+
+В ChatGPT выберите создание пользовательского сервера MCP, подключение Tunnel, OAuth и DCR. Базовые scopes: `bridge` и `project:<bridge_project_id>`. При переписывании Resource discovery туннелем укажите исходный ресурс локального сервера (`http://127.0.0.1:<port>/mcp`). После установки плагина отдельно завершите OAuth-вход; статус «Установлен» ещё не означает успешную авторизацию. Проверка `/readyz` также не заменяет вызов `project_info` из ChatGPT.
+
+DCR по умолчанию регистрирует допустимые project scopes; это список доступных для запроса областей, а не выданный доступ. Фактический токен ограничивает выбор одного проекта после подтверждения владельца. Форма подтверждения защищена случайным одноразовым токеном, его серверным digest и HttpOnly SameSite=Strict cookie; Origin от посторонних сайтов отклоняется. Origin `null` встроенного браузера принимается только при успешной проверке токена формы и cookie, затем требуется пароль владельца. CSP разрешает возврат только на origin зарегистрированного callback.

@@ -5,6 +5,7 @@ from .core import public_text
 from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.routes import build_metadata
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
@@ -23,7 +24,7 @@ def build(config,instance,runtime,vault=None):
         raise ValueError("Use HTTPS origin, or loopback HTTP for local testing")
     oauth=OAuth(runtime,vault or Vault(instance["instance_id"]),base,registry.projects)
     mcp=FastMCP("Multi-project Architect Bridge",instructions="Use only the project selected at OAuth approval. Source access is read-only. Submit one task; wait for result; review with ACCEPT/FIX. Never claim tests passed without executor evidence.",auth_server_provider=oauth,
-        auth=AuthSettings(issuer_url=base,resource_server_url=base+"/mcp",required_scopes=["bridge"],client_registration_options=ClientRegistrationOptions(enabled=True,valid_scopes=["bridge"]+["project:"+p for p in registry.projects],default_scopes=["bridge"]),revocation_options=RevocationOptions(enabled=True)),
+        auth=AuthSettings(issuer_url=base,resource_server_url=base+"/mcp",required_scopes=["bridge"],client_registration_options=ClientRegistrationOptions(enabled=True,valid_scopes=["bridge"]+["project:"+p for p in registry.projects],default_scopes=["bridge"]+["project:"+p for p in registry.projects]),revocation_options=RevocationOptions(enabled=True)),
         host="127.0.0.1",port=instance["port"],stateless_http=True,json_response=True,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,allowed_hosts=["127.0.0.1:*","localhost:*",parsed.netloc],allowed_origins=[base]))
     queues={p:Queue(v) for p,v in registry.projects.items()}
@@ -95,4 +96,14 @@ def build(config,instance,runtime,vault=None):
 
     @mcp.custom_route("/health",methods=["GET"])
     async def health(request): return JSONResponse({"service":"ai-bridge","status":"ok"})
+
+    @mcp.custom_route("/.well-known/oauth-authorization-server/",methods=["GET"])
+    async def metadata_with_trailing_slash(request):
+        # Tunnel discovery preserves the issuer's trailing slash. Serve the
+        # SDK metadata directly so its restricted HTTP relay needs no redirect.
+        auth=mcp.settings.auth
+        metadata=build_metadata(auth.issuer_url,auth.service_documentation_url,
+                                auth.client_registration_options,auth.revocation_options)
+        return JSONResponse(metadata.model_dump(mode="json",exclude_none=True),
+                            headers={"Cache-Control":"no-store"})
     return mcp,oauth

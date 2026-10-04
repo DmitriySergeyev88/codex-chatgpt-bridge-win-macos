@@ -31,20 +31,40 @@ def test_oauth_pkce_and_scoped_mcp(tmp_path):
         app=mcp.streamable_http_app()
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=instance["public_base_url"],follow_redirects=False) as client:
+                metadata=await client.get("/.well-known/oauth-authorization-server")
+                tunnel_metadata=await client.get("/.well-known/oauth-authorization-server/")
+                assert tunnel_metadata.status_code==200
+                assert "location" not in tunnel_metadata.headers
+                assert tunnel_metadata.json()==metadata.json()
                 headers={"Content-Type":"application/json","Accept":"application/json, text/event-stream"}
                 request={"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}
                 assert (await client.post("/mcp",json=request,headers=headers)).status_code==401
                 registration=await client.post("/register",json={"redirect_uris":["http://127.0.0.1:9999/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"]})
                 assert registration.status_code==201,registration.text
+                assert 'project:PROJECT-AAA' in registration.json()['scope'].split()
                 cid=registration.json()["client_id"]
                 verifier=secrets.token_urlsafe(40)
                 challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-                response=await client.get("/authorize",params={"response_type":"code","client_id":cid,"redirect_uri":"http://127.0.0.1:9999/callback","code_challenge":challenge,"code_challenge_method":"S256","scope":"bridge","state":"test-state","resource":oauth.resource})
+                response=await client.get("/authorize",params={"response_type":"code","client_id":cid,"redirect_uri":"http://127.0.0.1:9999/callback","code_challenge":challenge,"code_challenge_method":"S256","scope":"bridge project:PROJECT-AAA","state":"test-state","resource":oauth.resource})
                 assert response.status_code==302,response.text
                 location=response.headers["location"]; pending=parse_qs(urlsplit(location).query)["request"][0]
                 denied=await client.post("/owner",data={"request":pending,"owner":"wrong","project":"PROJECT-AAA"})
                 assert denied.status_code==403
-                approved=await client.post("/owner",data={"request":pending,"owner":vault.get("owner"),"project":"PROJECT-AAA"})
+                form_page=await client.get(location)
+                assert form_page.status_code==200
+                assert "form-action 'self' http://127.0.0.1:9999;" in form_page.headers['content-security-policy']
+                csrf=client.cookies.get("bridge_owner_csrf")
+                assert csrf and 'HttpOnly' in form_page.headers['set-cookie'] and 'SameSite=strict' in form_page.headers['set-cookie']
+                data={"request":pending,"csrf":csrf,"owner":vault.get("owner"),"project":"PROJECT-AAA"}
+                forged=await client.post("/owner",data={**data,"csrf":"forged"},headers={"Origin":"null"})
+                assert forged.status_code==403
+                missing_cookie=await client.post("/owner",data=data,headers={"Origin":"null","Cookie":""})
+                assert missing_cookie.status_code==403
+                foreign=await client.post("/owner",data=data,headers={"Origin":"https://foreign.example"})
+                assert foreign.status_code==403
+                wrong_password=await client.post("/owner",data={**data,"owner":"wrong"},headers={"Origin":"null"})
+                assert wrong_password.status_code==403
+                approved=await client.post("/owner",data=data,headers={"Origin":"null"})
                 assert approved.status_code==303,approved.text
                 code=parse_qs(urlsplit(approved.headers["location"]).query)["code"][0]
                 token_body={"grant_type":"authorization_code","client_id":cid,"code":code,"redirect_uri":"http://127.0.0.1:9999/callback","code_verifier":"bad-verifier","resource":oauth.resource}

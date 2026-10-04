@@ -2,6 +2,7 @@
 import hashlib
 import html
 import json
+import logging
 import secrets
 import sqlite3
 import time
@@ -74,22 +75,33 @@ class OAuth:
         self.put("client",client_info.client_id,client_info.model_dump(mode="json"))
 
     async def authorize(self,client,params):
-        if params.resource and params.resource!=self.resource: raise AuthorizeError("invalid_target","Resource mismatch")
+        if params.resource and params.resource!=self.resource:
+            logging.getLogger(__name__).warning("OAuth authorization rejected: resource binding mismatch")
+            raise AuthorizeError("invalid_target","Resource mismatch")
         scopes=params.scopes or ["bridge"]
         if any(s!="bridge" and s not in {"project:"+p for p in self.projects} for s in scopes): raise AuthorizeError("invalid_scope","Unknown project scope")
         pending=secrets.token_urlsafe(32)
         self.put("pending",pending,{"client":client.client_id,"params":params.model_dump(mode="json"),"expires":time.time()+600})
+        logging.getLogger(__name__).warning("OAuth authorization awaiting local owner approval")
         return self.base+"/owner?"+urlencode({"request":pending})
 
     async def owner_page(self,request):
         pending=request.query_params.get("request","") if request.method=="GET" else (await request.form()).get("request","")
         value=self.get("pending",pending)
         if not value or value["expires"]<time.time(): return HTMLResponse("Authorization request expired",400)
-        headers={"Cache-Control":"no-store","Content-Security-Policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer"}
+        callback=urlsplit(value["params"]["redirect_uri"])
+        callback_origin=callback.scheme+"://"+callback.netloc
+        headers={"Cache-Control":"no-store","Content-Security-Policy":f"default-src 'none'; form-action 'self' {callback_origin}; frame-ancestors 'none'","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer"}
         if request.method=="POST":
             form=await request.form()
             origin=request.headers.get("origin")
-            if origin and origin!=self.base: return HTMLResponse("Invalid origin",403,headers=headers)
+            csrf=str(form.get("csrf",""))
+            cookie=request.cookies.get("bridge_owner_csrf","")
+            if not csrf or not secrets.compare_digest(csrf,cookie) or not secrets.compare_digest(self.digest(csrf),value.get("csrf_digest","")):
+                return HTMLResponse("Invalid form token; reopen authorization",403,headers=headers)
+            if origin and origin not in (self.base,"null"):
+                logging.getLogger(__name__).warning("Owner approval rejected: foreign origin")
+                return HTMLResponse("Invalid origin",403,headers=headers)
             now=time.time(); ip=request.client.host
             failures=[x for x in self.attempts.get(ip,[]) if now-x<300]
             if len(failures)>=5: return HTMLResponse("Try again later",429,headers=headers)
@@ -109,8 +121,13 @@ class OAuth:
             if params.get("state") is not None: pairs["state"]=params["state"]
             redirect=params["redirect_uri"]
             return RedirectResponse(redirect+("&" if "?" in redirect else "?")+urlencode(pairs),status_code=303,headers=headers)
+        csrf=secrets.token_urlsafe(32)
+        value["csrf_digest"]=self.digest(csrf)
+        self.put("pending",pending,value)
         options="".join(f'<option value="{html.escape(pid)}">{html.escape(p.get("name",pid))}</option>' for pid,p in self.projects.items())
-        return HTMLResponse(f'''<!doctype html><html lang="ru"><meta charset="utf-8"><title>AI Bridge</title><h1>Доступ Architect</h1><p>Разрешается чтение исходников и обмен задачами/ревью для одного проекта.</p><p>Shell и запись исходников недоступны. Выберите проект для этого подключения.</p><form method="post"><input type="hidden" name="request" value="{html.escape(pending)}"><label>Проект <select name="project">{options}</select></label><p><label>Пароль владельца из Keychain <input type="password" name="owner" required autocomplete="current-password"></label></p><button>Разрешить</button></form></html>''',headers=headers)
+        response=HTMLResponse(f'''<!doctype html><html lang="ru"><meta charset="utf-8"><title>AI Bridge</title><h1>Доступ Architect</h1><p>Разрешается чтение исходников и обмен задачами/ревью для одного проекта.</p><p>Shell и запись исходников недоступны. Выберите проект для этого подключения.</p><form method="post"><input type="hidden" name="request" value="{html.escape(pending)}"><input type="hidden" name="csrf" value="{csrf}"><label>Проект <select name="project">{options}</select></label><p><label>Пароль владельца из Keychain <input type="password" name="owner" required autocomplete="current-password"></label></p><button>Разрешить</button></form></html>''',headers=headers)
+        response.set_cookie("bridge_owner_csrf",csrf,max_age=600,httponly=True,samesite="strict",secure=self.base.startswith("https:"),path="/owner")
+        return response
 
     async def load_authorization_code(self,client,authorization_code):
         value=self.get("code",authorization_code)
