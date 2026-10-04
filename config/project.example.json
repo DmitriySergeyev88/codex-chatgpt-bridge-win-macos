@@ -1,0 +1,12 @@
+{
+  "bridge_project_id": "MY-PROJECT",
+  "name": "Название проекта",
+  "workspace": "/absolute/path/to/project",
+  "chatgpt_thread": "architect-conversation-id",
+  "codex_workspace": "/absolute/path/to/project",
+  "mode": "CHATGPT_ARCHITECT",
+  "chatgpt_access": "READ_ONLY",
+  "auto_execute": false,
+  "enabled": true,
+  "deny_paths": []
+}

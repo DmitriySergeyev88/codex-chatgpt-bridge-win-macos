@@ -22,3 +22,12 @@ id_rsa
 id_rsa.pub
 *.pem
 *.key
+.venv/
+.runtime/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+config/projects/*.local.json
+config/instance.local.json
+macos/generated/
+config/projects/.gitkeep

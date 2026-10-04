@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "codex-chatgpt-multiproject-bridge"
+version = "0.1.0"
+description = "Project-scoped read-only MCP and durable Architect/Codex handoff for macOS"
+requires-python = ">=3.11"
+dependencies = ["mcp==1.26.0", "keyring==25.6.0"]
+[project.scripts]
+ai-bridge = "bridge.cli:main"
+[tool.setuptools.packages.find]
+include = ["bridge*"]
+[tool.pytest.ini_options]
+testpaths = ["tests/macos"]

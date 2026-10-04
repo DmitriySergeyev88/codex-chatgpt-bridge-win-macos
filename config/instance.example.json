@@ -1,0 +1,7 @@
+{
+  "instance_id": "my-multiproject-bridge",
+  "port": 8765,
+  "public_base_url": "https://bridge.example.com",
+  "codex_binary": "/absolute/path/to/codex",
+  "execution_timeout_seconds": 1800
+}

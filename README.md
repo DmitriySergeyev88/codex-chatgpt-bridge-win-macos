@@ -1,266 +1,183 @@
-<h1 align="center">Codex ChatGPT Bridge</h1>
+# Codex ↔ ChatGPT Bridge: macOS, несколько проектов
 
-<p align="center">
-  <strong>A safe bridge that lets Codex and ChatGPT hand off coding work — ChatGPT does the heavy thinking, Codex keeps local execution and verification under control.</strong>
-</p>
+Адаптация [Zhenyu98/codex-chatgpt-bridge](https://github.com/Zhenyu98/codex-chatgpt-bridge), исходный commit `351c66fef0390872443af1587a978e6f76f479b8`. MIT-лицензия сохранена. Оригинальные Windows-скрипты оставлены в `skills/.../scripts`; macOS использует новый Python-контроллер.
 
-<p align="center">
-  <strong>Save Codex tokens</strong> ·
-  <strong>ChatGPT plans, Codex executes</strong> ·
-  <strong>Local execution stays scoped and re-keyable</strong>
-</p>
+Один bridge обслуживает независимые проекты. ChatGPT проектирует и принимает работу; Codex меняет код и запускает тесты. Проекты не могут иметь одинаковые или вложенные рабочие папки. Один основной Architect thread назначается одному проекту.
 
-<p align="center">
-  <a href="https://github.com/Zhenyu98/codex-chatgpt-bridge/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Zhenyu98/codex-chatgpt-bridge?style=for-the-badge&logo=github"></a>
-  <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge"></a>
-  <img alt="Windows PowerShell" src="https://img.shields.io/badge/Windows-PowerShell-blue?style=for-the-badge&logo=windows&logoColor=white">
-  <img alt="Codex Skill" src="https://img.shields.io/badge/Codex-Skill-5B7266?style=for-the-badge">
-</p>
+## Что реализовано и что требует подключения
 
-<p align="center">
-  <a href="#what-this-is">What This Is</a> ·
-  <a href="#why">Why</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#agent-setup">Agent Setup</a> ·
-  <a href="#reboot-without-relinking">Reboot Without Relinking</a> ·
-  <a href="chatgpt-app-setup.md">App Setup</a> ·
-  <a href="#routing-modes">Routing</a> ·
-  <a href="#security-model">Security</a> ·
-  <a href="#faq">FAQ</a> ·
-  <a href="README_zh.md">简体中文</a>
-</p>
+Реализованы Streamable HTTP MCP, OAuth 2.1/PKCE, изоляция по project scope, безопасное чтение исходников, очередь TASK → Codex → result → ACCEPT/FIX, macOS Keychain, два LaunchAgent одного bridge (MCP и исполнитель), восстановление состояния и явный Off.
 
-<p align="center">
-  <img src="docs/assets/architecture.svg" alt="Codex ChatGPT Bridge architecture" width="92%" />
-</p>
+Пример профиля iiko: `config/iiko-backoffice.example.json`. Скопируйте его в `config/projects/iiko-backoffice.local.json` и заполните собственные пути и ID чатов. Исполнитель запускает отдельные короткие `codex exec`-сессии в рабочей папке; он не внедряет сообщения в существующий desktop Codex-чат.
 
-## What This Is
+Windows: исходный PowerShell/DevSpace workflow описан в [README.Windows.md](README.Windows.md). Принудительный read-only MCP этого fork реализован для macOS; Windows legacy-профиль использует разрешения как политику и не предоставляет ту же техническую границу.
 
-The MCP bridge itself is [DevSpace](https://github.com/Waishnav/devspace) — an upstream open-source project you install from npm as `@waishnav/devspace`. It owns the MCP server, OAuth, the file tools, and `run_shell`. This repository does not fork it, patch it, or wrap it in a second server.
+**Автоматическая передача данных и автоматическое пробуждение ChatGPT — разные возможности.** MCP передаёт задания/результаты без ZIP и копирования файлов, когда Architect обращается к инструментам. Сам сервер не может заставить существующий ChatGPT-чат начать новый ответ. `chatgpt_thread` хранит привязку для маршрутизации, но не является API для отправки сообщений. Постоянный автономный цикл с пробуждением требует отдельно разрешённого транспорта/доступного механизма уведомлений. Cookies, скрытые ChatGPT API и пароль от аккаунта здесь не используются.
 
-This repository adds the two things missing when you put DevSpace between a coding agent and ChatGPT: **a skill that tells the agent how to use it**, and **control scripts that live outside the bridge process**.
+Для облачного ChatGPT потребуется HTTPS endpoint или Secure MCP Tunnel и подключение в интерфейсе ChatGPT. Текущий `http://127.0.0.1:8765/mcp` предназначен для локальной проверки. Авторизация конкретного чата и публичный туннель не появляются от одного сохранения ID в config.
 
-| Layer | Owner | Responsibility |
-|---|---|---|
-| MCP bridge | DevSpace (upstream) | MCP server, OAuth, file tools, `run_shell` |
-| Skill | this repo — `SKILL.md` | when to hand a task to ChatGPT, permission levels `L0`–`L5`, task-packet and manifest formats, approval gates |
-| Control layer | this repo — `scripts/bridge_controller.ps1` | desired-state `On` / `Off` / `Reboot`, each a mutex-protected, health-verified transaction |
-| External recovery | this repo — `scripts/restart_task.ps1` | an on-demand Windows scheduled task that can reboot a bridge the agent can no longer reach |
-| Link stability | this repo — `scripts/set_cf_api_config.ps1` | refreshes the stable Worker upstream so the public MCP URL never moves |
+`auto_execute` в примерах — `false`: сначала подключите Architect и проверьте рабочее дерево. Существующие задания продукта не импортируются автоматически. Для продолжения нумерации задайте `task_number_start`; исходное задание нужно передать через `submit_task` целиком, а не восстанавливать по названию.
 
-Repo paths above are relative to [skills/codex-chatgpt-bridge/](skills/codex-chatgpt-bridge), which is what `install.ps1` copies to `%USERPROFILE%\.codex\skills\codex-chatgpt-bridge`.
+## Установка
 
-The control layer is deliberately external. A bridge cannot restart itself once it is down, and an agent that has just stopped its own transport has no way back in — so the lifecycle lives in scripts the agent invokes, plus a scheduled task that Windows invokes when the agent cannot.
-
-## Why
-
-Two separate costs make a long agent session expensive. One is quota: planning, re-reading, and repeated design iterations burn Codex tokens, so this skill routes that work to ChatGPT and keeps Codex on execution and verification. The other is setup churn: a bridge that changes its public URL on every restart makes you re-edit the app URL and re-authorize, which is why people leave it running when they should be closing it.
-
-| Before | After |
-|---|---|
-| Copy large context into the Codex chat to get a review | ChatGPT reads the scoped project directly over the bridge |
-| Codex spends quota planning, re-reading, and iterating | ChatGPT plans and reviews; Codex executes one task at a time |
-| Every restart rotates the tunnel URL, so you re-edit the ChatGPT app URL and re-authorize | The stable public URL stays pinned; `Reboot` refreshes the upstream behind it and the app link survives |
-| The agent stops the bridge and has no way to bring it back | `Reboot` is one verified transaction, and an external scheduled task can run it from outside the process |
-| `Off` is indistinguishable from a crash, so recovery tooling fights you | `Off` records an intentional shutdown, and `Reboot` refuses to override it |
-| A remote tool with unclear reach into your machine | A narrow, OAuth-gated root that is off by default and re-keyable |
-
-## Quick Start
-
-```powershell
-git clone https://github.com/Zhenyu98/codex-chatgpt-bridge.git
-cd codex-chatgpt-bridge
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+```sh
+git clone https://github.com/DmitriySergeyev88/codex-chatgpt-bridge-win-macos.git
+cd codex-chatgpt-bridge-win-macos
 ```
 
-If a copy is already installed, the installer moves it to a timestamped backup before copying the new skill. Use `-ForceOverwrite` only when you want to discard that installed copy. Add `-RegisterRestartTask` only if you also want the optional, on-demand Reboot task.
+Нужны macOS, Python 3.11+, Git, Codex CLI с выполненным `codex login` и доступ к login Keychain. Проверенная версия Codex CLI — 0.160.0. При существующей авторизации через ChatGPT новый API key не требуется.
 
-Expected success signal:
+```sh
+cd /absolute/path/to/codex-chatgpt-bridge
+cp config/instance.example.json config/instance.local.json
+mkdir -p config/projects
+cp config/project.example.json config/projects/my-project.local.json
+# Отредактируйте оба JSON: реальные абсолютные пути, ID Architect, URL и codex_binary.
+./install.sh
+.venv/bin/python -m bridge.cli launchd-install
+.venv/bin/python -m bridge.cli on
+.venv/bin/python -m bridge.cli doctor
+```
+
+Личные конфиги не входят в публичный репозиторий. `install.sh` создаёт venv и использует зафиксированные версии из `requirements.lock`. Он не меняет рабочие исходники проекта. `launchd-install` устанавливает два файла `org.codex.ai-bridge.server.plist` и `org.codex.ai-bridge.executor.plist` в `~/Library/LaunchAgents`. Они запускаются при входе пользователя и перезапускаются при сбое. Намеренный Off хранится отдельно; при следующем входе агенты не открывают выключенный bridge.
+
+Мастер-ключ шифрования OAuth-state и пароль владельца хранятся в Keychain service `org.codex.ai-bridge`, accounts `<instance_id>:encryption` и `<instance_id>:owner`. В config нет паролей. Секреты не передаются как аргументы subprocess. Доступ к Keychain может запросить системное разрешение для Python.
+
+## Подключение ChatGPT
+
+1. Подготовьте стабильный HTTPS-прокси/туннель к `127.0.0.1:8765`. Он должен сохранять путь `/mcp`, OAuth-маршруты и корректный Host. Укажите HTTPS origin **без пути** в `public_base_url`, затем выполните `reboot`. Не направляйте прокси на DevSpace.
+2. В developer mode ChatGPT добавьте MCP-подключение с URL `https://your-host/mcp`, выберите OAuth. SDK публикует discovery metadata, dynamic registration, authorize/token/revoke endpoints.
+3. Для пароля владельца выполните **в собственном локальном интерактивном терминале** `.venv/bin/python -m bridge.cli owner-password`. Введите пароль только в странице авторизации bridge. Не вставляйте его в чат.
+4. При OAuth выберите ровно один проект. Для другого проекта создайте отдельное подключение к тому же bridge и выберите другой project scope. Один сервер обслуживает все подключения; токен одного проекта не открывает другой.
+5. В главном Architect-чате включите соответствующий MCP и вызовите `project_info`, `list_files`, `read_file` для README. `.env` и чужой проект должны возвращать ошибку. Затем включите локально `auto_execute: true` в профиле проекта и выполните `reboot`, когда очередь и рабочая папка готовы.
+
+При наличии OpenAI Secure MCP Tunnel можно использовать поддерживаемый OpenAI tunnel-client для доступа к локальному `/mcp`. Это отдельный транспорт: его tunnel ID, runtime credential и авторизация не поставляются с репозиторием. Совместимость конкретного tunnel auth flow нужно проверить после подключения; локальные тесты не подтверждают её.
+
+Официальная документация: [MCP server quickstart](https://developers.openai.com/plugins/build/app-quickstart), [подключение MCP](https://developers.openai.com/plugins/deploy/connect-chatgpt), [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [Codex non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode).
+
+## Профиль проекта
+
+```json
+{
+  "bridge_project_id": "OSKZ-IIKO-BACKOFFICE",
+  "name": "Сервис AI бэк-офиса iiko",
+  "workspace": "/absolute/path/to/iiko",
+  "chatgpt_thread": "architect-conversation-id",
+  "codex_workspace": "/absolute/path/to/iiko",
+  "mode": "CHATGPT_ARCHITECT",
+  "chatgpt_access": "READ_ONLY",
+  "auto_execute": false,
+  "enabled": true,
+  "task_number_start": 3,
+  "deny_paths": ["ops", "config", "docs/test-results"]
+}
+```
+
+В первой версии `workspace` и `codex_workspace` должны разрешаться в одну папку — так очередь, исходники и результат не расходятся. Это корень Git-репозитория, не весь домашний каталог. `bridge_project_id`: 3–64 символа, заглавные латинские буквы, цифры, `_` и `-`, первый символ — буква. `deny_paths` дополняет встроенный запрет секретов.
+
+`chatgpt_thread` — назначенный основной чат. MCP не сообщает надёжный conversation ID: сервер принудительно изолирует **проект по OAuth scope**, но не может доказать, что вызов пришёл именно из записанного чата. Не включайте проектное подключение в другие чаты, которым этот проект не нужен.
+
+При `init` создаётся:
 
 ```text
-Installed codex-chatgpt-bridge skill to C:\Users\<you>\.codex\skills\codex-chatgpt-bridge
-Restart Codex or reload skills to use it.
+.ai-bridge/
+├── state.json             # читаемая проекция состояния
+├── architecture.md        # привязка ролей; действующие спецификации продукта остаются главными
+├── tasks/TASK-NNN-Rn.json
+├── results/TASK-NNN-Rn.json
+├── reviews/TASK-NNN-Rn.json
+├── queue.sqlite3          # источник истины и история переходов
+├── .executor.lock
+└── .export.lock
 ```
 
-Then check the local environment (no tunnel started):
+MCP не предоставляет произвольную запись файлов, включая `architecture.md`. Этот документ редактирует Codex локально по принятому решению. Для задач/ревью разрешены только структурированные операции, которые записывают фиксированные записи очереди. `READ_ONLY` означает read-only **исходников**, а не полный запрет metadata-записей.
 
-```powershell
-$skill = "$env:USERPROFILE\.codex\skills\codex-chatgpt-bridge"
-powershell -ExecutionPolicy Bypass -File "$skill\scripts\local_bridge.ps1" -Action Doctor
+## Цикл работы
+
+Architect вызывает `submit_task(bridge_project_id, title, instructions, acceptance, idempotency_key)`. Инструкции должны включать полный scope и требования; недоступные ChatGPT-вложения не скачиваются автоматически. Запрос нельзя принять, если предыдущая задача не принята. Повтор с тем же ключом и payload возвращает прежний ответ; другой payload с тем же ключом отклоняется.
+
+Исполнитель забирает `QUEUED` → `RUNNING`. Он использует `codex exec --sandbox workspace-write`, schema для результата и существующую локальную авторизацию Codex. У него отключена пользовательская конфигурация и дополнительные execpolicy rules, нет bypass sandbox; cwd закреплён на проекте. Файлы/тесты/критерии/отклонения возвращаются структурированно. Сырые события не выдаются ChatGPT и удаляются после обычного завершения.
+
+Result сохраняется, успешное исполнение получает `AWAITING_REVIEW`. Architect через `task_result` читает отчёт и историю, через `read_file`/`git_diff` проверяет фактический код. `git_diff` показывает tracked-изменения; новые untracked-файлы нужно читать отдельно. Непройденные критерии дают `EXECUTION_FAILED`: его нельзя принять как успешный.
+
+`review_task` требует точную revision:
+
+- `ACCEPT` → `ACCEPTED`, затем разрешён следующий `submit_task`.
+- `FIX` → следующая revision той же задачи и `QUEUED`, инструкции дополнены замечаниями.
+- Старое ревью, повторное исполнение с прежним run ID и преждевременная приёмка отклоняются.
+
+Одна задача исполняется в проекте одновременно. Для разных проектов работают отдельные очереди и исполнители; сбой одного не меняет состояние другого. Проверка критериев в result подтверждает полноту отчёта, но статус PASS остаётся утверждением Codex, которое Architect проверяет по коду и свидетельствам. Это не универсальный формальный доказатель корректности.
+
+Для запуска ровно одной уже поставленной задачи локально:
+
+```sh
+.venv/bin/python -m bridge.cli execute-once OSKZ-IIKO-BACKOFFICE
 ```
 
-`Doctor` also reports whether the upstream bridge CLI is present. Install it from npm if it is missing — this repository drives that CLI rather than shipping its own:
+## Добавление проекта
 
-```powershell
-npm install -g @waishnav/devspace
+1. Скопируйте `config/project.example.json` в `config/projects/<name>.local.json`.
+2. Заполните уникальные project ID, Architect thread и реальные пути. Укажите `deny_paths`, если в проекте есть чувствительные данные вне стандартных мест.
+3. Запустите `init`: он проверит профиль и создаст `.ai-bridge`, не перезаписывая существующую архитектуру. Дублирующиеся/вложенные workspace и один Architect на два проекта запрещены.
+4. Выполните `reboot`, затем отдельную OAuth-авторизацию нового проекта. При добавлении проекта прежние токены сохраняются, но не получают доступ к новой папке.
+5. Поставьте небольшую задачу, проверьте результат и ревью, затем включите `auto_execute`.
+
+Локальные `.local.json`, `.runtime`, Keychain и очереди не включайте в публичный репозиторий. При необходимости добавьте `.ai-bridge/` в локальный Git exclude проекта; установщик не изменяет его автоматически.
+
+## Восстановление после перезапуска
+
+```sh
+.venv/bin/python -m bridge.cli status
+.venv/bin/python -m bridge.cli doctor
+.venv/bin/python -m bridge.cli reboot
 ```
 
-## Agent Setup
+`on` включает желаемое состояние и проверяет `/health` + отказ неавторизованного `/mcp` (401). `off` закрывает локальный сервис, сохраняя OAuth. `reboot` выполняет остановку/запуск и отказывается менять intentional Off. Занятый чужим процессом порт не приводит к убийству процесса: запуск не проходит проверку/блокировку.
 
-Copy this prompt into Codex, Claude Code, Cursor, or another coding agent:
+SQLite transactions, fsync и блокировки сохраняют очередь. Если процесс упал между фиксацией состояния и экспортом JSON, повторный `init` восстановит `state.json` и остальные проекции из БД. История результатов/ревью прежних revisions сохраняется.
 
-```text
-Read https://github.com/Zhenyu98/codex-chatgpt-bridge/blob/main/agent-setup.md and follow it to install and configure codex-chatgpt-bridge for me.
+Если Codex был прерван, bridge не запускает задачу повторно автоматически. При исчезнувшем исполнителе статус становится `INTERRUPTED`. Если дочерний Codex ещё работает, восстановление сохраняет `RUNNING`; даже возможное повторное использование PID трактуется осторожно. Сначала проверьте живой процесс и рабочий diff, затем:
+
+```sh
+.venv/bin/python -m bridge.cli recover OSKZ-IIKO-BACKOFFICE
+# Только после проверки исходников и отсутствия живого исполнителя:
+.venv/bin/python -m bridge.cli retry OSKZ-IIKO-BACKOFFICE TASK-003
 ```
 
-See [agent-setup.md](agent-setup.md) for the full copy-paste prompt, prerequisites, and safe defaults.
+Ошибку исполнения можно исправить через Architect FIX или повторить локально после выяснения причины. ACCEPT не выдаёт разрешение на commit/push/install/deploy. Такие действия остаются отдельным поручением человеку/Codex.
 
-## Routing Modes
+Для отзыва OAuth:
 
-- `NORMAL`: ChatGPT acts like a strong review/reasoning subagent. Codex inspects enough context to steer the task, then executes and verifies.
-- `TOKEN_SAVING`: Codex acts mostly as the orchestrator. Safe non-mutating reading, broad review, and synthesis go to ChatGPT whenever they save Codex tokens.
-- `CHATGPT_ARCHITECT`: the planning-inverted mode for long, continuous builds. ChatGPT is the architect/manager (spec, design, task decomposition, per-task prompts, review); Codex executes one small task at a time and verifies. With your explicit `L3` grant, ChatGPT can also write over the bridge while Codex integrates.
-
-The router picks by marginal cost: a unit of work goes to ChatGPT when it saves far more Codex tokens than the cost of one slow bridge round-trip. When a plan needs parallel subagents, ChatGPT can serve as the subagent pool so the fan-out stays off Codex quota, while Codex remains the single orchestrator that integrates and verifies.
-
-## Bridge Controller
-
-```powershell
-$skill = "$env:USERPROFILE\.codex\skills\codex-chatgpt-bridge"
-$controller = "$skill\scripts\bridge_controller.ps1"
-
-# Save a non-secret profile once. Use cloudflare for a changing Quick Tunnel,
-# or cloudflare-worker plus a stable Worker URL.
-powershell -ExecutionPolicy Bypass -File $controller -Action Configure -ProjectRoot "D:\your\project" -Tunnel cloudflare -InstallCloudflared
-
-powershell -ExecutionPolicy Bypass -File $controller -Action On
-powershell -ExecutionPolicy Bypass -File $controller -Action Reboot
-powershell -ExecutionPolicy Bypass -File $controller -Action Off
-powershell -ExecutionPolicy Bypass -File $controller -Action Status
-powershell -ExecutionPolicy Bypass -File $controller -Action Doctor
-
-# Panic button: revoke issued OAuth tokens and mint a new Owner password.
-powershell -ExecutionPolicy Bypass -File "$skill\scripts\local_bridge.ps1" -Action Rotate
+```sh
+.venv/bin/python -m bridge.cli rotate
 ```
 
-The controller is the external control layer and the primary entry point for all normal lifecycle operations. It keeps a non-secret desired-state profile separate from transient runtime state, so the difference between "off on purpose" and "died" is recorded rather than guessed. `On` records an intentional running state. `Off` records an intentional stopped state and closes the service and tunnel while preserving the ChatGPT app configuration. `Restart` and `Reboot` are the same mutex-protected transaction: stop, start, refresh Worker KV when configured, and verify the local, Quick Tunnel, and stable Worker endpoints before success. A Reboot refuses to reopen a bridge intentionally turned off with `Off`; use `On` to open it again.
+`rotate` выключает bridge, удаляет grants и меняет пароль владельца в Keychain. После него требуются `on` и повторная OAuth-авторизация. Резервируйте queue.sqlite3 через SQLite backup API при работающем процессе; либо остановите bridge и сохраните всю `.ai-bridge`. Потеря Keychain мастер-ключа означает потерю старой OAuth-state: нужна новая авторизация, очередь задач при этом не теряется.
 
-DevSpace's own `Start` and `Stop` remain available as recovery primitives, but they do not own the desired-state contract and should not be an agent's default. Drive the lifecycle through `On`, `Off`, and `Reboot`.
+Удаление LaunchAgents:
 
-For a stable Worker setup, configure the profile and store a minimum-scope Cloudflare token with Windows DPAPI **before** the first `On`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File $controller -Action Configure -ProjectRoot "D:\your\project" -Tunnel cloudflare-worker -PublicBaseUrl https://bridge.example.workers.dev -InstallCloudflared
-powershell -ExecutionPolicy Bypass -File "$skill\scripts\set_cf_api_config.ps1" -Action Set -AccountId <account-id> -KvNamespaceId <namespace-id>
-powershell -ExecutionPolicy Bypass -File $controller -Action On
+```sh
+.venv/bin/python -m bridge.cli off
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/org.codex.ai-bridge.server.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/org.codex.ai-bridge.executor.plist
+rm ~/Library/LaunchAgents/org.codex.ai-bridge.server.plist ~/Library/LaunchAgents/org.codex.ai-bridge.executor.plist
 ```
 
-To keep one default working directory while authorizing several explicit file roots, add a semicolon-separated list. `ProjectRoot` must be inside one of the allowed roots:
+## Безопасность и DevSpace
 
-```powershell
-powershell -ExecutionPolicy Bypass -File $controller -Action Configure -ProjectRoot "C:\Users\you\DevSpace" -AllowedRoots "C:\Users\you\DevSpace;D:\Projects;E:\Reference" -Tunnel cloudflare-worker -PublicBaseUrl https://bridge.example.workers.dev
+У upstream DevSpace есть write_file/edit_file/run_shell. Его уровни разрешений — политика, а не принудительная read-only граница. Поэтому он **не используется в открытом Architect-профиле**. Совместимый стандарт MCP сохранён через официальный Python SDK; оригинальный DevSpace/Windows workflow сохранён в исходных файлах как отдельный legacy-вариант. Нельзя запускать исходный installer/DevSpace endpoint и считать, что новый read-only профиль его ограничивает.
+
+Публичные инструменты: `project_info`, `list_files`, `read_file`, `search_files`, `git_status`, `git_diff`, `submit_task`, `task_result`, `review_task`. Никаких generic write/shell/install/git commit/push tools. Результат добавляет только локальный Codex executor.
+
+Чтение ограничено типами текстовых исходников/документов. Запрещены `.env*` (включая example), `.git`, credentials/secrets/password/token paths, `.ssh/.aws`, `.npmrc`, Keychain/runtime, private keys, storage, базы, логи, build/dependency-каталоги, symlinks, hardlinks и специальные файлы. Traversal и абсолютные пути отклоняются; файлы открываются через directory descriptors с O_NOFOLLOW. Поиск — literal, ограничен 100 результатами и 10 000 entries; файл ≤256 KB. Git принимает только фиксированные status/diff без shell, fsmonitor, external diff/textconv и пользовательских flags; чувствительные paths исключены.
+
+Распространённые credential patterns маскируются в содержимом и result. Это дополнительная защита, не доказательство отсутствия произвольного секрета в разрешённом исходнике. Если секрет случайно записан в обычный документ, исключите этот документ через `deny_paths` и устраните утечку. Codex и bridge работают от одного macOS пользователя: Keychain защищает хранение, но не изолирует уже работающий локальный executor от прав этого пользователя. Для более строгой OS-изоляции нужен отдельный пользователь/VM.
+
+## Проверки
+
+```sh
+.venv/bin/python -m pytest -q
 ```
 
-The controller stores the list in profile schema v2 and forwards it to DevSpace on every `On` or `Restart`, so later configuration runs do not collapse access back to one root.
-
-The credential helper reads the saved Worker URL from the controller profile and writes the matching non-credential operational metadata to `worker-proxy.json` alongside the DPAPI-protected credential. The file still contains your Worker URL and KV namespace ID: keep it local and out of git. You can override the URL explicitly with `-WorkerBaseUrl` for a standalone setup.
-
-The helper verifies a DPAPI encrypt/decrypt round trip before saving and removes an older plaintext `cf-api.json` after a successful migration. Controller-driven `On` / `Reboot` rejects plaintext legacy credentials. If `-InstallCloudflared` downloads the tunnel binary, the bridge verifies a valid Windows Authenticode signature from Cloudflare, Inc. before installing or running it.
-
-Stable Worker and external public base URLs must use HTTPS and cannot contain embedded credentials, a query string, or a fragment.
-
-The optional scheduled task is an external, on-demand recovery entrypoint. It has no automatic trigger and always calls the single `Reboot` transaction:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$skill\scripts\restart_task.ps1" -Action Install
-powershell -ExecutionPolicy Bypass -File "$skill\scripts\restart_task.ps1" -Action Run
-```
-
-`Run` only requests the task asynchronously. Confirm the final result in `%LOCALAPPDATA%\devspace-bridge\controller-result.json`, then run controller `Doctor`. The default task uses the same interactive Windows user, so that user must be logged on; this improves recovery reliability but is not a security boundary. True isolation requires a separate least-privilege OS account plus ACL-separated scripts, state, logs, and credentials.
-
-`Rotate` remains the panic button: it stops the bridge, revokes all issued OAuth tokens, and mints a new Owner password. Run it after suspected unauthorized access, then use controller `On` and re-authorize.
-
-## Reboot Without Relinking
-
-The reason to close an idle bridge is that a public endpoint you are not using is pure attack surface. The reason people leave it open anyway is that a Quick Tunnel URL rotates on restart, so closing it costs a round of app-URL editing and reauthorization in ChatGPT. Pin a stable layer in front of the rotating one and that cost disappears:
-
-```text
-ChatGPT app URL          fixed, configured once
-  ↓
-stable Worker / proxy    fixed hostname, upstream stored in KV
-  ↓
-current Quick Tunnel     rotates freely on every restart
-  ↓
-local DevSpace MCP       bound to your allowed roots
-```
-
-`On` and `Reboot` push the new upstream into Worker KV and only report success once the local, Quick Tunnel, and stable Worker endpoints all answer the expected `200/401` health contract. The ChatGPT app never sees the churn, so the practical loop becomes:
-
-```text
-Off when idle  →  On when working  →  Reboot when something breaks
-```
-
-with no app recreation, no URL edits, and no reauthorization in between. `Off` preserves the app configuration and authorization material precisely to keep that true; use `Rotate` when you actually want to revoke.
-
-A raw Quick Tunnel URL is fine for a first smoke test but a poor choice for a saved app.
-
-## ChatGPT App Setup
-
-The full walkthrough lives in **[chatgpt-app-setup.md](chatgpt-app-setup.md)**: developer mode, the app URL, OAuth authorization (including where to read the Owner password from), the read-only smoke test, and a troubleshooting table.
-
-Two rules before you approve anything: confirm the exposed project root is correct and narrow, and never paste the Owner password, tokens, OAuth secrets, cookies, or API keys into a chat message or a screenshot.
-
-## Security Model
-
-Be honest about the trust boundary: once you OAuth-authorize the ChatGPT app, the bridge grants file read/write and shell execution on your machine. Being a skill rather than a sandbox is the load-bearing caveat here: the `L0`–`L5` levels are policy that Codex instructs ChatGPT to follow, not something the bridge enforces. Because `run_shell` is not confined to the root, an authorized app effectively holds local-user code execution. Only three boundaries are actually enforced, and two of them are DevSpace's: OAuth approval (a strong random Owner password) and the narrow `allowedRoots` for file tools. The third is this repo's contribution — closing reachability with controller `Off`, which is why an easy `Off` matters more than the level table.
-
-Practical rules:
-
-- Use controller `Off` when the bridge is idle — the always-on public endpoint is the main attack surface.
-- Keep the root narrow and free of secrets; for stronger isolation, run under a least-privilege OS account or a disposable VM.
-- Review controller `Doctor.securityWarnings`; drive roots, the full user profile, and ancestors of the user profile are flagged as overly broad.
-- If you suspect someone else connected, run `-Action Rotate` to revoke all tokens and re-key.
-- Controller state and logs contain local paths, PIDs, and tunnel URLs. Redact them before sharing screenshots or diagnostics.
-- Stop and restart operations identify DevSpace by the configured listening port. An unrelated process on that port is reported and preserved; recovery fails instead of killing it.
-- Shell-command logging defaults to disabled to reduce accidental secret retention. Set the user-level `DEVSPACE_LOG_SHELL_COMMANDS=true` only when you explicitly need an audit trail.
-
-## FAQ
-
-**Is this a fork of DevSpace?**
-
-No. DevSpace is installed unmodified from npm as `@waishnav/devspace` and remains the MCP bridge. This repository is the skill an agent reads plus the scripts it calls, and it does not replace, patch, or proxy the upstream server.
-
-**Why does the lifecycle need to live outside the bridge?**
-
-Because a stopped process cannot restart itself, and an agent whose transport just went down cannot ask it to. The controller runs as a separate script the agent invokes, and the optional scheduled task is a second entrypoint Windows invokes when even that is out of reach.
-
-**Do I have to reconfigure the ChatGPT app after every restart?**
-
-Not with a stable Worker or proxy in front. See [Reboot Without Relinking](#reboot-without-relinking) — the app URL is fixed and `Reboot` swaps only the upstream behind it.
-
-**Can ChatGPT run anything on my machine?**
-
-Once you OAuth-authorize the app, the bridge allows file read/write and shell execution within your setup. `run_shell` is not sandboxed, so treat an authorized app as local-user execution: keep the root narrow, use controller `Off` when idle, and use `Rotate` to revoke access.
-
-**Does `Off` revoke ChatGPT's access?**
-
-`Off` records that the shutdown is intentional and closes the tunnel and service, so the workspace becomes unreachable. It keeps the app authorization so the next `On` can reuse the same app. To revoke issued tokens, run `Rotate`.
-
-**Why not run low-level `Start` and `Stop` directly?**
-
-They remain recovery primitives, but they do not own the persistent desired-state contract. Normal operation goes through `On`, `Off`, and `Reboot`, which prevent an intentional shutdown from being mistaken for a failed bridge and add Worker KV plus health verification.
-
-**Will ChatGPT edit my source directly?**
-
-In the default advice profile, Codex applies and verifies every change. With your explicit `L3` grant, ChatGPT writes over the bridge and Codex reviews the diff, runs an independent check, and owns Git operations plus the final verdict.
-
-**The Quick Tunnel URL keeps changing.**
-
-Quick Tunnel URLs rotate on restart, which suits testing. For a fixed ChatGPT app URL, front it with a stable Worker / custom proxy or external tunnel.
-
-## Contributing
-
-Issues and pull requests are welcome. Please keep reports specific, include reproduction steps when possible, and avoid sharing secrets in logs or screenshots.
-
-## Acknowledgements
-
-- The MCP bridge this skill drives is the open-source [DevSpace](https://github.com/Waishnav/devspace) project by Waishnav, used unmodified from npm. All bridge-side credit belongs there.
-- Special thanks to [LINUX.DO](https://linux.do/) for providing a promotion platform.
-
-## License
-
-Released under the MIT License. See [LICENSE](LICENSE).
-
-## Star History
-
-[![Star History Chart](https://www.repostars.dev/api/og?repos=Zhenyu98%2Fcodex-chatgpt-bridge&theme=light&ogv=4&v=20260705)](https://www.star-history.com/?repos=Zhenyu98%2Fcodex-chatgpt-bridge&type=date&legend=top-left)
+Тесты проверяют project isolation, запрет secrets/traversal/symlink/hardlink/FIFO, подавление external Git diff, идемпотентность, crash recovery, FIX/ACCEPT, следующие задания, реальный HTTP MCP, OAuth/PKCE, replay кода, refresh/revoke и сохранение токенов после реконструкции сервера. Изолированная настоящая Codex-проверка описана отдельно в `VALIDATION.md`. Она не является product acceptance iiko.

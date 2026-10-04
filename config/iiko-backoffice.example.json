@@ -1,0 +1,18 @@
+{
+  "bridge_project_id": "OSKZ-IIKO-BACKOFFICE",
+  "name": "Сервис AI бэк-офиса iiko",
+  "workspace": "/absolute/path/to/iiko",
+  "chatgpt_thread": "architect-conversation-id",
+  "codex_workspace": "/absolute/path/to/iiko",
+  "codex_thread_reference": "codex-thread-id",
+  "mode": "CHATGPT_ARCHITECT",
+  "chatgpt_access": "READ_ONLY",
+  "auto_execute": false,
+  "enabled": true,
+  "deny_paths": [
+    "ops",
+    "config",
+    "docs/test-results"
+  ],
+  "task_number_start": 3
+}
