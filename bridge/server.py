@@ -11,6 +11,7 @@ from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 from .auth import OAuth, Vault
 from .core import Registry, Queue, SafeFiles
+from .task_packet import TaskTitle, TaskInstructions, TaskAcceptance, TaskKey
 
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -74,8 +75,13 @@ def build(config,instance,runtime,vault=None):
         return SafeFiles(project(bridge_project_id)).git("diff")
 
     @mcp.tool(annotations=WRITE)
-    def submit_task(bridge_project_id:str,title:str,instructions:str,acceptance:list[str],idempotency_key:str)->dict:
-        """Enqueue one structured Architect task. Writes only bridge queue metadata."""
+    def submit_task(bridge_project_id:str,title:TaskTitle,instructions:TaskInstructions,acceptance:TaskAcceptance,idempotency_key:TaskKey)->dict:
+        """Enqueue the complete plain-text Architect task; writes only queue metadata.
+
+        Limits are Unicode characters, not UTF-8 bytes. Preserve the full specification
+        and each acceptance criterion. No gzip/xz/base64 decoding is performed.
+        Retry the same unchanged packet with the same idempotency key after a timeout.
+        """
         project(bridge_project_id)
         return queues[bridge_project_id].submit(title,instructions,acceptance,idempotency_key)
 

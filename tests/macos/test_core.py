@@ -119,3 +119,36 @@ def test_numbering_and_result_scrub(tmp_path):
     task=q.claim(); r=result(task);r["summary"]='password="longsecretvalue"'
     q.finish(task,r)
     assert "longsecretvalue" not in json.dumps(q.details("TASK-003"))
+
+
+@pytest.mark.parametrize("length",[79497,47887,39952,262144])
+def test_large_packet_preserved_after_restart(tmp_path,length):
+    p=project(tmp_path);q=Queue(p)
+    instructions=("Полная спецификация 🙂\n"*((length//21)+1))[:length]
+    assert len(instructions)==length
+    acceptance=[f"Критерий {i}: "+"я"*1500 for i in range(24)]
+    q.submit("Full task",instructions,acceptance,"full-task-0001")
+    restored=Queue(p)
+    task=restored.claim()
+    assert task["instructions"]==instructions and task["acceptance"]==acceptance
+    assert restored.submit("Full task",instructions,acceptance,"full-task-0001")["task_id"]==task["task_id"]
+
+
+@pytest.mark.parametrize("change,field,limit",[
+    ({"title":"x"*201},"title","200"),
+    ({"instructions":"я"*262145},"instructions","262144"),
+    ({"instructions":""},"instructions","1"),
+    ({"acceptance":[]},"acceptance","1"),
+    ({"acceptance":["C"]*101},"acceptance","100"),
+    ({"acceptance":["ok","я"*8193]},"acceptance.1","8192"),
+    ({"key":"bad key!"},"idempotency_key","pattern"),
+])
+def test_packet_rejection_is_specific_and_atomic(tmp_path,change,field,limit):
+    q=Queue(project(tmp_path))
+    args=dict(title="Title",instructions="Full instructions",acceptance=["C"],key="packet-0001")
+    with pytest.raises(ValueError) as error:q.submit(**(args|change))
+    assert field in str(error.value) and limit in str(error.value)
+    assert q.status()["tasks"]==[]
+    with q.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]==0
+        assert db.execute("SELECT COUNT(*) FROM history").fetchone()[0]==0

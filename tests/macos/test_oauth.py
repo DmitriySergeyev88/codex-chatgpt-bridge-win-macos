@@ -82,11 +82,25 @@ def test_oauth_pkce_and_scoped_mcp(tmp_path):
                 listing=await client.post("/mcp",json={"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}},headers=headers)
                 names={x["name"] for x in listing.json()["result"]["tools"]}
                 assert names=={"project_info","read_file","list_files","search_files","git_status","git_diff","submit_task","task_result","review_task"}
+                schema=next(x for x in listing.json()["result"]["tools"] if x["name"]=="submit_task")["inputSchema"]["properties"]
+                assert schema["instructions"]["minLength"]==1 and schema["instructions"]["maxLength"]==262144
+                assert schema["title"]["maxLength"]==200
+                assert schema["acceptance"]["minItems"]==1 and schema["acceptance"]["maxItems"]==100
+                assert schema["acceptance"]["items"]["maxLength"]==8192
+                assert schema["idempotency_key"]["maxLength"]==128 and "pattern" in schema["idempotency_key"]
                 assert not (await call("read_file",{"bridge_project_id":"PROJECT-AAA","path":"README.md"})).get("isError",False)
                 assert (await call("read_file",{"bridge_project_id":"PROJECT-BBB","path":"README.md"}))["isError"]
                 assert (await call("read_file",{"bridge_project_id":"PROJECT-AAA","path":".env"}))["isError"]
                 assert (await call("run_shell",{"command":"echo bad"}))["isError"]
-                await call("submit_task",{"bridge_project_id":"PROJECT-AAA","title":"Smoke","instructions":"Test","acceptance":["Works"],"idempotency_key":"smoke-0001"})
+                invalid=await call("submit_task",{"bridge_project_id":"PROJECT-AAA","title":"Smoke","instructions":"я"*262145,"acceptance":["Works"],"idempotency_key":"smoke-0001"})
+                assert invalid["isError"] and "instructions" in str(invalid) and "262144" in str(invalid)
+                assert Queue(a).status()["tasks"]==[]
+                full_text=("Полная спецификация\n"*4000)[:79497]
+                criteria=[f"Критерий {i}" for i in range(24)]
+                submitted=await call("submit_task",{"bridge_project_id":"PROJECT-AAA","title":"Smoke","instructions":full_text,"acceptance":criteria,"idempotency_key":"smoke-0001"})
+                assert not submitted.get("isError",False)
+                saved=Queue(a).details("TASK-001")["task"]
+                assert saved["instructions"]==full_text and saved["acceptance"]==criteria
                 queue=Queue(a); task=queue.claim(); queue.finish(task,result(task))
                 fix=await call("review_task",{"bridge_project_id":"PROJECT-AAA","task_id":"TASK-001","revision":1,"verdict":"FIX","feedback":"Improve test evidence","idempotency_key":"review-fix-0001"})
                 assert not fix.get("isError",False)

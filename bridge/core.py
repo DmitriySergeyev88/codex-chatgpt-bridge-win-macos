@@ -11,6 +11,7 @@ import stat
 import subprocess
 import tempfile
 import time
+from .task_packet import validate_task_packet
 
 MAX_BYTES = 256_000
 ID = re.compile(r"^[A-Z][A-Z0-9_-]{2,63}$")
@@ -269,9 +270,11 @@ class Queue:
         return digest, None
 
     def submit(self, title, instructions, acceptance, key):
-        if not title or not instructions or not acceptance or len(title) > 200 or len(instructions) > 24000 or len(acceptance) > 30 or any(not isinstance(x, str) or not x or len(x) > 1000 for x in acceptance): raise ValueError("Invalid task packet")
+        validate_task_packet(title,instructions,acceptance,key)
         payload = {"title": title, "instructions": instructions, "acceptance": acceptance}
-        if public_text(json.dumps(payload)) != json.dumps(payload): raise ValueError("Potential secret in task packet")
+        for field, value in payload.items():
+            encoded=json.dumps(value)
+            if public_text(encoded) != encoded: raise ValueError(f"Invalid task packet: {field}: potential credential detected; remove credential values, not specification text")
         with self.db() as db:
             digest, old = self.idempotent(db, key, payload)
             if old: return old
