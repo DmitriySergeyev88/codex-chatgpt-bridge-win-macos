@@ -5,7 +5,7 @@ import signal
 import subprocess
 import tempfile
 import time
-from .core import Queue, lock, public_text, SafeFiles
+from .core import Queue, lock, public_text, SafeFiles, atomic_json
 
 SCHEMA={"type":"object","additionalProperties":False,"required":["task_id","revision","summary","files_changed","tests","acceptance","deviations"],"properties":{
     "task_id":{"type":"string"},"revision":{"type":"integer"},"summary":{"type":"string"},"files_changed":{"type":"array","items":{"type":"string"}},"tests":{"type":"array","items":{"type":"object","additionalProperties":False,"required":["command","status","evidence"],"properties":{"command":{"type":"string"},"status":{"type":"string","enum":["PASS","FAIL","NOT_RUN","BLOCKED"]},"evidence":{"type":"string"}}}},"acceptance":{"type":"array","items":{"type":"object","additionalProperties":False,"required":["criterion","status","evidence"],"properties":{"criterion":{"type":"string"},"status":{"type":"string","enum":["PASS","FAIL","NOT_RUN","BLOCKED"]},"evidence":{"type":"string"}}}},"deviations":{"type":"array","items":{"type":"string"}}}}
@@ -30,6 +30,7 @@ def run_once(project,instance,runtime):
             before=SafeFiles(project).git("status")
             with tempfile.TemporaryDirectory(prefix="executor-",dir=runtime) as directory:
                 directory=Path(directory)
+                atomic_json(directory/"run.json",{k:task[k] for k in ("bridge_project_id","task_id","revision","run_id")})
                 schema=directory/"schema.json"; output=directory/"result.json"
                 schema.write_text(json.dumps(SCHEMA))
                 binary=instance["codex_binary"]
